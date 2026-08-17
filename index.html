@@ -189,49 +189,60 @@
   </header>
 
   <div class="stream-grid" id="streamGrid">
-    <div style="color: var(--muted); font-size: 14px;">멤버 방송 상태 확인 중...</div>
+    <div style="color: var(--muted); font-size: 14px;">상태 확인 중...</div>
   </div>
 
   <script>
-    // 클창서버 멤버 목록 (실제 SOOP 아이디 입력)
+    // 클창서버 멤버 목록 (실제 SOOP 방송국 아이디를 입력해주세요)
     const SERVER_MEMBERS = [
       { id: "cnsgkcnehd74", name: "조경훈", role: "수장" },
       { id: "gudcjf604", name: "블랙워크", role: "건축가" },
-      { id: "streamer_id_3", name: "멤버3", role: "광부" },
-      { id: "streamer_id_4", name: "멤버4", role: "모험가" },
-      { id: "streamer_id_5", name: "멤버5", role: "상인" }
+      { id: "아이디3", name: "멤버3", role: "광부" }
     ];
 
     document.getElementById("totalCount").innerText = SERVER_MEMBERS.length;
 
-    // Netlify 서버 프록시를 통해 SOOP API 호출 (보안 차단 및 CORS 완전 우회)
-    async function checkStatus(userId) {
-      try {
-        const res = await fetch(`/api/soop/live_status.action?szBid=${userId}`);
-        const data = await res.json();
-        
-        const isLive = data.REAL_BROAD === "Y" || data.RESULT === 1;
-        return {
-          isLive: isLive,
-          title: data.BROAD_TITLE || "클창서버 라이브",
-          broadNo: data.BROAD_NO
+    // 실시간 라이브 썸네일 이미지 로드 기반 판별 (API 차단/CORS 무관)
+    function checkLiveByImage(userId) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        const timestamp = Date.now();
+        const liveThumbUrl = `https://liveimg.sooplive.co.kr/m/${userId}?t=${timestamp}`;
+
+        const timer = setTimeout(() => {
+          resolve({ isLive: false, thumb: null });
+        }, 2500);
+
+        img.onload = function() {
+          clearTimeout(timer);
+          // 방송 중이 아닐 때 SOOP은 기본 1x1 또는 no_image를 반환하므로 크기로 검증
+          if (img.naturalWidth > 10 && img.naturalHeight > 10) {
+            resolve({ isLive: true, thumb: liveThumbUrl });
+          } else {
+            resolve({ isLive: false, thumb: null });
+          }
         };
-      } catch (err) {
-        return { isLive: false };
-      }
+
+        img.onerror = function() {
+          clearTimeout(timer);
+          resolve({ isLive: false, thumb: null });
+        };
+
+        img.src = liveThumbUrl;
+      });
     }
 
     async function updateDashboard() {
       const grid = document.getElementById("streamGrid");
 
       const promises = SERVER_MEMBERS.map(async (m) => {
-        const status = await checkStatus(m.id);
+        const status = await checkLiveByImage(m.id);
         return { ...m, ...status };
       });
 
       const list = await Promise.all(promises);
 
-      // 라이브 중인 멤버 상단 정렬
+      // 라이브 중인 멤버 우선 정렬
       list.sort((a, b) => (b.isLive ? 1 : 0) - (a.isLive ? 1 : 0));
 
       const liveTotal = list.filter(m => m.isLive).length;
@@ -244,21 +255,17 @@
           : `https://ch.sooplive.co.kr/${m.id}`;
 
         if (m.isLive) {
-          const liveThumb = m.broadNo 
-            ? `https://liveimg.sooplive.co.kr/m/${m.broadNo}?${Date.now()}`
-            : profileUrl;
-
           return `
             <a class="card is-live" href="${targetLink}" target="_blank">
               <div class="media-wrap">
-                <img class="thumb-img" src="${liveThumb}" onerror="this.src='${profileUrl}'" alt="${m.name}" />
+                <img class="thumb-img" src="${m.thumb}" alt="${m.name}" />
               </div>
               <div class="card-info">
                 <div class="tags-row">
                   <span class="status-badge live">● LIVE</span>
                   <span class="role-badge">${m.role}</span>
                 </div>
-                <div class="stream-title" title="${m.title}">${m.title}</div>
+                <div class="stream-title">클창서버 라이브 방송 중</div>
                 <div class="stream-author">${m.name} (@${m.id}) ↗</div>
               </div>
             </a>
