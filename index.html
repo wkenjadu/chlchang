@@ -10,7 +10,6 @@
       --card-bg: #161b22;
       --border: #30363d;
       --live-red: #ff334b;
-      --offline-gray: #6e7681;
       --accent-blue: #58a6ff;
       --text: #f0f6fc;
       --muted: #8b949e;
@@ -53,10 +52,10 @@
       color: var(--live-red);
     }
 
-    /* 통합 그리드 */
+    /* 카드 그리드 */
     .stream-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
       gap: 20px;
     }
 
@@ -67,29 +66,40 @@
       overflow: hidden;
       display: flex;
       flex-direction: column;
-      transition: transform 0.2s, border-color 0.2s;
+      text-decoration: none;
+      color: inherit;
+      transition: transform 0.15s ease, border-color 0.15s ease;
+      cursor: pointer;
+    }
+    .card:hover {
+      transform: translateY(-3px);
+      border-color: #58a6ff;
     }
     .card.is-live {
-      border-color: rgba(255, 51, 75, 0.4);
+      border-color: rgba(255, 51, 75, 0.5);
+    }
+    .card.is-live:hover {
+      border-color: var(--live-red);
     }
 
-    /* 16:9 미디어 영역 */
+    /* 16:9 미디어 썸네일 영역 */
     .media-wrap {
       position: relative;
       width: 100%;
       padding-top: 56.25%;
       background: #000;
+      overflow: hidden;
     }
-    .media-wrap iframe {
+    .thumb-img {
       position: absolute;
       top: 0;
       left: 0;
       width: 100%;
       height: 100%;
-      border: none;
+      object-fit: cover;
+      opacity: 0.9;
     }
 
-    /* 오프라인 대기 화면 */
     .offline-placeholder {
       position: absolute;
       top: 0;
@@ -101,27 +111,21 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 12px;
-      text-decoration: none;
-      color: var(--text);
-    }
-    .offline-placeholder:hover {
-      background: #161a22;
+      gap: 10px;
     }
     .profile-img {
-      width: 68px;
-      height: 68px;
+      width: 64px;
+      height: 64px;
       border-radius: 50%;
       border: 2px solid var(--border);
       background: #21262d;
     }
-    .offline-tag {
+    .offline-text {
       font-size: 12px;
       color: var(--muted);
       background: rgba(255, 255, 255, 0.05);
-      padding: 4px 10px;
+      padding: 3px 8px;
       border-radius: 4px;
-      border: 1px solid var(--border);
     }
 
     /* 카드 하단 정보 */
@@ -181,7 +185,7 @@
   <header>
     <div class="title-box">
       <h1>🏰 클창서버 LIVE 전광판</h1>
-      <p>실시간 라이브 및 멤버 방송국 전체보기</p>
+      <p>클릭 시 해당 스트리머 방송/방송국으로 즉시 이동합니다</p>
     </div>
     <div class="badge-counter">
       ON AIR: <span class="live-num" id="liveCount">0</span> / <span id="totalCount">0</span>
@@ -189,11 +193,11 @@
   </header>
 
   <div class="stream-grid" id="streamGrid">
-    <div style="color: var(--muted); font-size: 14px;">멤버 현황 불러오는 중...</div>
+    <div style="color: var(--muted); font-size: 14px;">멤버 방송 상태 확인 중...</div>
   </div>
 
   <script>
-    // 클창서버 멤버 목록
+    // 클창서버 스트리머 목록 (실제 SOOP 방송국 ID를 입력하세요)
     const SERVER_MEMBERS = [
       { id: "cnsgkcnehd74", name: "조경훈", role: "수장" },
       { id: "gudcjf604", name: "블랙워크", role: "건축가" },
@@ -204,16 +208,24 @@
 
     document.getElementById("totalCount").innerText = SERVER_MEMBERS.length;
 
-    // SOOP 라이브 상태 확인
+    // CORS 우회 프록시를 통해 SOOP 라이브 상태 조회
     async function checkStatus(userId) {
       try {
-        const res = await fetch(`https://live.sooplive.co.kr/afreeca/live_status.action?szBid=${userId}`);
-        const data = await res.json();
+        const targetUrl = `https://live.sooplive.co.kr/afreeca/live_status.action?szBid=${userId}`;
+        // allorigins 프록시 사용 (CORS 차단 방지)
+        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+        
+        const res = await fetch(proxyUrl);
+        const jsonWrapper = await res.json();
+        const data = JSON.parse(jsonWrapper.contents);
+
+        const isLive = data.REAL_BROAD === "Y" || data.RESULT === 1;
         return {
-          isLive: data.REAL_BROAD === "Y" || data.RESULT === 1,
-          title: data.BROAD_TITLE || "클창서버 라이브"
+          isLive: isLive,
+          title: data.BROAD_TITLE || "클창서버 라이브",
+          broadNo: data.BROAD_NO
         };
-      } catch {
+      } catch (err) {
         return { isLive: false };
       }
     }
@@ -227,26 +239,30 @@
         list.push({ ...m, ...status });
       }
 
-      // 라이브 중인 멤버를 먼저 앞에 정렬
+      // 라이브 중인 멤버 우선 정렬
       list.sort((a, b) => (b.isLive ? 1 : 0) - (a.isLive ? 1 : 0));
 
       const liveTotal = list.filter(m => m.isLive).length;
       document.getElementById("liveCount").innerText = liveTotal;
 
       grid.innerHTML = list.map(m => {
-        // 프로필 이미지 URL (SOOP 방송국 기본 로고 경로)
         const profileUrl = `https://stimg.sooplive.co.kr/LOGO/${m.id.slice(0, 2)}/${m.id}/${m.id}.jpg`;
+        
+        // 클릭 시 이동할 URL (라이브 중이면 웹 플레이어 주소, 오프라인이면 방송국 홈)
+        const targetLink = m.isLive 
+          ? `https://play.sooplive.co.kr/${m.id}` 
+          : `https://ch.sooplive.co.kr/${m.id}`;
 
         if (m.isLive) {
-          // 라이브 ON 카드
+          // 라이브 카드 (실시간 썸네일 노출 및 클릭 시 새 탭 이동)
+          const liveThumb = m.broadNo 
+            ? `https://liveimg.sooplive.co.kr/m/${m.broadNo}?${Date.now()}`
+            : profileUrl;
+
           return `
-            <div class="card is-live">
+            <a class="card is-live" href="${targetLink}" target="_blank">
               <div class="media-wrap">
-                <iframe 
-                  src="https://play.sooplive.co.kr/${m.id}/embed" 
-                  allowfullscreen 
-                  allow="autoplay; encrypted-media">
-                </iframe>
+                <img class="thumb-img" src="${liveThumb}" onerror="this.src='${profileUrl}'" alt="${m.name}" />
               </div>
               <div class="card-info">
                 <div class="tags-row">
@@ -254,35 +270,35 @@
                   <span class="role-badge">${m.role}</span>
                 </div>
                 <div class="stream-title" title="${m.title}">${m.title}</div>
-                <div class="stream-author">${m.name} (@${m.id})</div>
+                <div class="stream-author">${m.name} (@${m.id}) ↗</div>
               </div>
-            </div>
+            </a>
           `;
         } else {
-          // 오프라인 카드 (클릭 시 방송국 이동)
+          // 오프라인 카드 (프로필 노출 및 클릭 시 방송국 홈 이동)
           return `
-            <div class="card">
+            <a class="card" href="${targetLink}" target="_blank">
               <div class="media-wrap">
-                <a class="offline-placeholder" href="https://ch.sooplive.co.kr/${m.id}" target="_blank">
+                <div class="offline-placeholder">
                   <img class="profile-img" src="${profileUrl}" onerror="this.src='https://res.sooplive.co.kr/images/mobile/common/no_profile.png'" alt="${m.name}" />
-                  <span class="offline-tag">방송국 바로가기 ↗</span>
-                </a>
+                  <span class="offline-text">방송국 바로가기 ↗</span>
+                </div>
               </div>
               <div class="card-info">
                 <div class="tags-row">
                   <span class="status-badge offline">OFFLINE</span>
                   <span class="role-badge">${m.role}</span>
                 </div>
-                <div class="stream-title muted">현재 오프라인 상태입니다</div>
+                <div class="stream-title muted">현재 방송 중이 아닙니다</div>
                 <div class="stream-author">${m.name} (@${m.id})</div>
               </div>
-            </div>
+            </a>
           `;
         }
       }).join("");
     }
 
-    // 1분 간격 갱신
+    // 최초 실행 및 60초마다 갱신
     updateDashboard();
     setInterval(updateDashboard, 60000);
   </script>
