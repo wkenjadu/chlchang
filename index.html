@@ -52,7 +52,6 @@
       color: var(--live-red);
     }
 
-    /* 카드 그리드 */
     .stream-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
@@ -82,7 +81,6 @@
       border-color: var(--live-red);
     }
 
-    /* 16:9 미디어 썸네일 영역 */
     .media-wrap {
       position: relative;
       width: 100%;
@@ -97,7 +95,6 @@
       width: 100%;
       height: 100%;
       object-fit: cover;
-      opacity: 0.9;
     }
 
     .offline-placeholder {
@@ -128,7 +125,6 @@
       border-radius: 4px;
     }
 
-    /* 카드 하단 정보 */
     .card-info {
       padding: 14px;
       display: flex;
@@ -197,10 +193,10 @@
   </div>
 
   <script>
-    // 클창서버 멤버 목록 (테스트 및 실제 방송국 ID 입력)
+    // 클창서버 멤버 목록 (실제 SOOP 아이디 입력)
     const SERVER_MEMBERS = [
       { id: "cnsgkcnehd74", name: "조경훈", role: "수장" },
-      { id: "gudcjf604", name: "블랙워크", role: "건축가" },
+      { id: "streamer_id_2", name: "멤버2", role: "건축가" },
       { id: "streamer_id_3", name: "멤버3", role: "광부" },
       { id: "streamer_id_4", name: "멤버4", role: "모험가" },
       { id: "streamer_id_5", name: "멤버5", role: "상인" }
@@ -208,56 +204,34 @@
 
     document.getElementById("totalCount").innerText = SERVER_MEMBERS.length;
 
-    // JSONP 방식으로 CORS 차단 없이 직접 SOOP API 호출
-    function checkStatusJSONP(userId) {
-      return new Promise((resolve) => {
-        const callbackName = 'soop_cb_' + userId + '_' + Math.floor(Math.random() * 100000);
-        const script = document.createElement('script');
-
-        // 타임아웃 방지 (3초 내 응답 없으면 오프라인 처리)
-        const timeout = setTimeout(() => {
-          cleanup();
-          resolve({ isLive: false });
-        }, 3000);
-
-        function cleanup() {
-          clearTimeout(timeout);
-          delete window[callbackName];
-          if (script.parentNode) script.parentNode.removeChild(script);
-        }
-
-        window[callbackName] = function(data) {
-          cleanup();
-          const isLive = data && (data.REAL_BROAD === "Y" || data.RESULT === 1);
-          resolve({
-            isLive: isLive,
-            title: data?.BROAD_TITLE || "클창서버 라이브",
-            broadNo: data?.BROAD_NO
-          });
+    // Netlify 서버 프록시를 통해 SOOP API 호출 (보안 차단 및 CORS 완전 우회)
+    async function checkStatus(userId) {
+      try {
+        const res = await fetch(`/api/soop/live_status.action?szBid=${userId}`);
+        const data = await res.json();
+        
+        const isLive = data.REAL_BROAD === "Y" || data.RESULT === 1;
+        return {
+          isLive: isLive,
+          title: data.BROAD_TITLE || "클창서버 라이브",
+          broadNo: data.BROAD_NO
         };
-
-        script.src = `https://live.sooplive.co.kr/afreeca/live_status.action?szBid=${userId}&callback=${callbackName}`;
-        script.onerror = () => {
-          cleanup();
-          resolve({ isLive: false });
-        };
-
-        document.body.appendChild(script);
-      });
+      } catch (err) {
+        return { isLive: false };
+      }
     }
 
     async function updateDashboard() {
       const grid = document.getElementById("streamGrid");
-      
-      // 병렬로 모든 멤버 상태 동시 조회
+
       const promises = SERVER_MEMBERS.map(async (m) => {
-        const status = await checkStatusJSONP(m.id);
+        const status = await checkStatus(m.id);
         return { ...m, ...status };
       });
 
       const list = await Promise.all(promises);
 
-      // 라이브 중인 멤버 우선 정렬
+      // 라이브 중인 멤버 상단 정렬
       list.sort((a, b) => (b.isLive ? 1 : 0) - (a.isLive ? 1 : 0));
 
       const liveTotal = list.filter(m => m.isLive).length;
@@ -312,7 +286,6 @@
       }).join("");
     }
 
-    // 실행 및 30초마다 자동 갱신
     updateDashboard();
     setInterval(updateDashboard, 30000);
   </script>
